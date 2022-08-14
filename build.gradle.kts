@@ -6,7 +6,7 @@ plugins {
 }
 
 group = "ilio"
-version = "1.0-SNAPSHOT"
+version = "1.0.0"
 
 repositories {
     mavenLocal()
@@ -15,6 +15,7 @@ repositories {
 }
 
 dependencies {
+    implementation("org.apache.httpcomponents.client5:httpclient5:5.1.3")
     implementation("org.jetbrains.kotlinx:kotlinx-serialization-json:1.4.0-RC")
 
 //    testImplementation(platform("org.junit:junit-bom:5.9.0"))
@@ -30,5 +31,5 @@ tasks.test {
 }
 
 tasks.withType<KotlinCompile> {
-    kotlinOptions.jvmTarget = "17"
+    kotlinOptions.jvmTarget = "1.8"
 }

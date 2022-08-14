@@ -1,13 +1,14 @@
 package ilio.bark
 
 import kotlinx.serialization.ExperimentalSerializationApi
-import kotlinx.serialization.decodeFromString
 import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.*
+import org.apache.hc.client5.http.classic.methods.HttpGet
+import org.apache.hc.client5.http.classic.methods.HttpPost
+import org.apache.hc.client5.http.impl.classic.HttpClients
+import org.apache.hc.core5.http.ContentType
+import org.apache.hc.core5.http.io.entity.HttpEntities
 import java.net.URI
-import java.net.http.HttpClient
-import java.net.http.HttpRequest
-import java.net.http.HttpResponse
 import java.util.*
 
 @OptIn(ExperimentalSerializationApi::class)
@@ -23,7 +24,7 @@ class ApiClient private constructor(private val baseApi: String, private val bas
         }
     }
 
-    private val http = HttpClient.newHttpClient()
+    private val http = HttpClients.createDefault()
     private val json = Json {
         encodeDefaults = true
         explicitNulls = false
@@ -39,24 +40,23 @@ class ApiClient private constructor(private val baseApi: String, private val bas
 
         val pushAsString = json.encodeToString(newPush)
 
-        val request = HttpRequest.newBuilder(buildUri(Endpoints.push))
-            .header("Content-Type", "application/json")
-            .header("Authorization", "Basic $basicAuthToken")
-            .POST(HttpRequest.BodyPublishers.ofString(pushAsString))
-            .build()
+        val request = HttpPost(buildUri(Endpoints.push)).apply {
+            addHeader("Authorization", "Basic $basicAuthToken")
+            entity = HttpEntities.create(pushAsString, ContentType.APPLICATION_JSON)
+        }
         return try {
-            val response = http.send(request, HttpResponse.BodyHandlers.ofString())
-            val jsonView = response.headers().allValues("content-type").any { it.contains("application/json") }
-            if (!jsonView) {
-                throw IllegalArgumentException(response.body())
-            }
-            val json = Json.decodeFromString<JsonElement>(response.body()).jsonObject
+            http.execute(request).use {
+                if (it.entity.contentType != "application/json") {
+                    throw IllegalArgumentException(it.entity.content.reader().readText())
+                }
+                val json = Json.decodeFromStream<JsonElement>(it.entity.content).jsonObject
 
-            PushBack(
-                code = json["code"]?.jsonPrimitive?.int ?: response.statusCode(),
-                timestamp = json["timestamp"]?.jsonPrimitive?.long ?: System.currentTimeMillis(),
-                message = json["message"]?.jsonPrimitive?.content ?: ""
-            )
+                PushBack(
+                    code = json["code"]?.jsonPrimitive?.int ?: it.code,
+                    timestamp = json["timestamp"]?.jsonPrimitive?.long ?: System.currentTimeMillis(),
+                    message = json["message"]?.jsonPrimitive?.content ?: ""
+                )
+            }
         } catch (e: Exception) {
             System.err.println(e.stackTraceToString())
 
@@ -69,16 +69,18 @@ class ApiClient private constructor(private val baseApi: String, private val bas
     }
 
     fun ping(): Pong {
-        val request = HttpRequest.newBuilder(buildUri(Endpoints.ping)).GET().build()
+        val request = HttpGet(buildUri(Endpoints.ping))
         return try {
-            val response = http.send(request, HttpResponse.BodyHandlers.ofString())
-            val json = Json.decodeFromString<JsonElement>(response.body()).jsonObject
+            http.execute(request).use {
+                val json = Json.decodeFromStream<JsonElement>(it.entity.content).jsonObject
 
-            Pong(
-                code = json["code"]?.jsonPrimitive?.int ?: response.statusCode(),
-                timestamp = json["timestamp"]?.jsonPrimitive?.long ?: System.currentTimeMillis(),
-                message = json["message"]?.jsonPrimitive?.content ?: ""
-            )
+                Pong(
+                    code = json["code"]?.jsonPrimitive?.int ?: it.code,
+                    timestamp = json["timestamp"]?.jsonPrimitive?.long ?: System.currentTimeMillis(),
+                    message = json["message"]?.jsonPrimitive?.content ?: ""
+                )
+            }
+
         } catch (e: Exception) {
             System.err.println(e.stackTraceToString())
 
@@ -91,18 +93,21 @@ class ApiClient private constructor(private val baseApi: String, private val bas
     }
 
     fun info(): ServerInfo {
-        val request = HttpRequest.newBuilder(buildUri(Endpoints.info)).GET().build()
+        val request = HttpGet(buildUri(Endpoints.info)).apply {
+            addHeader("Authorization", "Basic $basicAuthToken")
+        }
         return try {
-            val response = http.send(request, HttpResponse.BodyHandlers.ofString())
-            val json = Json.decodeFromString<JsonElement>(response.body()).jsonObject
+            http.execute(request).use {
+                val json = Json.decodeFromStream<JsonElement>(it.entity.content).jsonObject
 
-            ServerInfo(
-                version = json["version"]?.jsonPrimitive?.content ?: "",
-                build = json["build"]?.jsonPrimitive?.content ?: "",
-                arch = json["arch"]?.jsonPrimitive?.content ?: "",
-                commit = json["commit"]?.jsonPrimitive?.content ?: "",
-                devices = json["devices"]?.jsonPrimitive?.long ?: 0,
-            )
+                ServerInfo(
+                    version = json["version"]?.jsonPrimitive?.content ?: "",
+                    build = json["build"]?.jsonPrimitive?.content ?: "",
+                    arch = json["arch"]?.jsonPrimitive?.content ?: "",
+                    commit = json["commit"]?.jsonPrimitive?.content ?: "",
+                    devices = json["devices"]?.jsonPrimitive?.long ?: 0,
+                )
+            }
         } catch (e: Exception) {
             System.err.println(e.stackTraceToString())
             ServerInfo()
@@ -110,10 +115,11 @@ class ApiClient private constructor(private val baseApi: String, private val bas
     }
 
     fun health(): Boolean {
-        val request = HttpRequest.newBuilder(buildUri(Endpoints.health)).GET().build()
+        val request = HttpGet(buildUri(Endpoints.health))
         return try {
-            val response = http.send(request, HttpResponse.BodyHandlers.ofString())
-            response.body() == "ok"
+            http.execute(request).use {
+                it.entity.content.reader().readText() == "ok"
+            }
         } catch (e: Exception) {
             System.err.println(e.stackTraceToString())
             false
