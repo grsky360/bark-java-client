@@ -36,3 +36,15 @@ tasks.test {
 tasks.withType<KotlinCompile> {
     kotlinOptions.jvmTarget = "1.8"
 }
+
+publishing {
+    publications {
+        create<MavenPublication>("maven") {
+            groupId = "ilio"
+            artifactId = "bark-java-client"
+            version = Versions.project
+
+            from(components["kotlin"])
+        }
+    }
+}
